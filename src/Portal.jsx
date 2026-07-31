@@ -80,6 +80,7 @@ const clone = (o) => JSON.parse(JSON.stringify(o));
 const money = (n, c = "$") => `${n < 0 ? "−" : ""}${c}${Math.abs(Number(n || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (d) => d ? new Date(d + (d.length === 10 ? "T12:00:00" : "")).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" }) : "";
 const fmtShort = (d) => d ? new Date(d + (d.length === 10 ? "T12:00:00" : "")).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+const fmtMonthYear = (p) => p ? new Date(p + "-01T12:00:00").toLocaleDateString(undefined, { month: "long", year: "numeric" }) : "";
 const timeAgo = (ts) => { const s = Math.floor((Date.now() - ts) / 1000); if (s < 60) return "just now"; if (s < 3600) return `${Math.floor(s / 60)}m ago`; if (s < 86400) return `${Math.floor(s / 3600)}h ago`; return `${Math.floor(s / 86400)}d ago`; };
 const initials = (name) => (name || "?").split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
 const pad2 = (n) => String(n).padStart(2, "0");
@@ -212,7 +213,7 @@ function seedDb() {
     M("m7", "Sasha Flores", "Member", "sasha@rotaract.club", `${curRY}-01-10`),
     M("m8", "Omar Bacab", "Prospect", "omar@mail.com", todayStr(), { status: "Applied" }),
   ];
-  const duesConfig = { monthly: 10, district: 15, ri: 8, currency: "$", dueDay: 5, graceDays: 10, lateFee: 2, lateFeeOn: false };
+  const duesConfig = { monthly: 10, district: 15, ri: 8, currency: "$", dueDay: 5, graceDays: 10, lateFee: 2, lateFeeOn: false, districtDueDate: "", riDueDate: "" };
   const nextThu = new Date(); nextThu.setDate(nextThu.getDate() + ((4 - nextThu.getDay() + 7) % 7 || 7));
   const lastThu = new Date(); lastThu.setDate(lastThu.getDate() - ((lastThu.getDay() - 4 + 7) % 7 || 7));
   const plusDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
@@ -304,7 +305,7 @@ function seedProductionDb(clubName, creator) {
     club: { name: clubName || "Rotaract Club", tagline: "Fellowship through service", logo: null, colors: { primary: "#D41367", secondary: "#0067C8" }, charterDate: todayStr() },
     years: [yCur], activeYearId: yCur.id,
     members: [{ id: uid(), name: creator?.name || "President", role: "President", email: creator?.email || "", phone: "", joined: todayStr(), status: "Active", ...blankMemberExtras() }],
-    duesConfig: { monthly: 0, district: 0, ri: 0, currency: "$", dueDay: 5, graceDays: 10, lateFee: 0, lateFeeOn: false },
+    duesConfig: { monthly: 0, district: 0, ri: 0, currency: "$", dueDay: 5, graceDays: 10, lateFee: 0, lateFeeOn: false, districtDueDate: "", riDueDate: "" },
     charges: [], payments: [], credits: [], arrangements: [], exemptions: [],
     transactions: [], seq: { receipt: 0 }, locks: {}, reconciliations: {},
     audit: [{ id: uid(), ts: now, by: creator?.name || "system", action: "Club created", detail: clubName || "" }],
@@ -319,6 +320,18 @@ function seedProductionDb(clubName, creator) {
 }
 
 /* ============ Finance derivations ============ */
+// The date a member most recently became dues-liable: their last transition
+// from a non-active-like status (Prospect/Applied/Guest/Inactive/...) into
+// Active or On Leave, falling back to their join date for members who were
+// created as Active directly (never went through an approval transition).
+function activeSinceOf(m) {
+  const hist = m.statusHistory || [];
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const s = hist[i];
+    if (ACTIVE_LIKE.includes(s.to) && !ACTIVE_LIKE.includes(s.from)) return new Date(s.at).toISOString().slice(0, 10);
+  }
+  return m.joined || todayStr();
+}
 function ensureObligations(d) {
   const y = d.years.find((x) => x.id === d.activeYearId);
   if (!y) return false;
@@ -328,22 +341,24 @@ function ensureObligations(d) {
   const months = ryMonths(y.startYear).filter((p) => `${p}-01` <= t);
   activeMembers.forEach((m) => {
     if (exemptIds.has(m.id)) return;
-    months.forEach((period) => {
+    const since = activeSinceOf(m);
+    // Never bill for months before the member was actually a member (e.g. while still a Prospect/Guest).
+    months.filter((period) => `${period}-01` >= since.slice(0, 7) + "-01").forEach((period) => {
       if (cfg.monthly > 0 && !d.charges.some((c) => c.memberId === m.id && c.kind === "monthly" && c.period === period && !c.reversed)) {
         d.charges.push({ id: uid(), yearId: y.id, memberId: m.id, kind: "monthly", label: `Monthly dues ${period}`, period, amount: cfg.monthly, dueDate: `${period}-${pad2(cfg.dueDay)}`, at: Date.now(), by: "system", reversed: false });
         changed = true;
       }
     });
-    const firstP = ryMonths(y.startYear)[0];
-    if (`${firstP}-01` <= t) {
-      ["district", "ri"].forEach((k) => {
-        const amt = k === "district" ? cfg.district : cfg.ri;
-        if (amt > 0 && !d.charges.some((c) => c.memberId === m.id && c.kind === k && c.yearId === y.id && !c.reversed)) {
-          d.charges.push({ id: uid(), yearId: y.id, memberId: m.id, kind: k, label: `${CHARGE_KINDS[k]} ${y.label}`, period: firstP, amount: amt, dueDate: `${firstP}-${pad2(cfg.dueDay)}`, at: Date.now(), by: "system", reversed: false });
-          changed = true;
-        }
-      });
-    }
+    [["district", cfg.district, cfg.districtDueDate], ["ri", cfg.ri, cfg.riDueDate]].forEach(([k, amt, configuredDate]) => {
+      const withinYear = configuredDate && configuredDate >= y.start && configuredDate <= y.end;
+      // Due on the configured date, but never before the member actually joined.
+      const dueDate = withinYear && configuredDate > since ? configuredDate : since;
+      if (dueDate > t) return; // the due date (or their join date) hasn't arrived yet
+      if (amt > 0 && !d.charges.some((c) => c.memberId === m.id && c.kind === k && c.yearId === y.id && !c.reversed)) {
+        d.charges.push({ id: uid(), yearId: y.id, memberId: m.id, kind: k, label: `${CHARGE_KINDS[k]} ${y.label}`, period: dueDate.slice(0, 7), amount: amt, dueDate, at: Date.now(), by: "system", reversed: false });
+        changed = true;
+      }
+    });
   });
   return changed;
 }
@@ -1680,7 +1695,7 @@ function DuesManager() {
   const members = db.members.filter((m) => ACTIVE_LIKE.includes(m.status));
   const saveCfg = () => {
     patch((d) => {
-      d.duesConfig = { ...d.duesConfig, monthly: +cfg.monthly || 0, district: +cfg.district || 0, ri: +cfg.ri || 0, currency: cfg.currency || "$", dueDay: Math.min(28, Math.max(1, +cfg.dueDay || 5)), graceDays: +cfg.graceDays || 0, lateFee: +cfg.lateFee || 0, lateFeeOn: !!cfg.lateFeeOn };
+      d.duesConfig = { ...d.duesConfig, monthly: +cfg.monthly || 0, district: +cfg.district || 0, ri: +cfg.ri || 0, currency: cfg.currency || "$", dueDay: Math.min(28, Math.max(1, +cfg.dueDay || 5)), graceDays: +cfg.graceDays || 0, lateFee: +cfg.lateFee || 0, lateFeeOn: !!cfg.lateFeeOn, districtDueDate: cfg.districtDueDate || "", riDueDate: cfg.riDueDate || "" };
       ensureObligations(d);
       audit(d, "Dues configuration changed", `Monthly ${money(+cfg.monthly, cfg.currency)}, due day ${cfg.dueDay}, grace ${cfg.graceDays}d`);
     });
@@ -1731,7 +1746,7 @@ function DuesManager() {
         <Btn small kind="quiet" onClick={regen}>Generate obligations</Btn>
         <Btn small kind="quiet" onClick={applyLateFees}>Apply late charges</Btn>
       </div>
-      <p className="mt-2 mb-2" style={{ fontSize: 12, color: "#9A8B93" }}>Obligations (monthly, district, RI) are auto-created for each active, non-exempt member. Due day {db.duesConfig.dueDay}, grace {db.duesConfig.graceDays} days.</p>
+      <p className="mt-2 mb-2" style={{ fontSize: 12, color: "#9A8B93" }}>Obligations (monthly, district, RI) are auto-created for each active, non-exempt member from the date they joined — Prospects and Guests owe nothing. Monthly due day {db.duesConfig.dueDay}, grace {db.duesConfig.graceDays} days.</p>
       <div className="flex flex-col gap-2">
         {members.map((m) => {
           const a = memberAccount(db, m.id, year.id);
@@ -1758,14 +1773,17 @@ function DuesManager() {
       <Sheet open={cfgOpen} onClose={() => setCfgOpen(false)} title="Dues configuration" tall>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Monthly club dues"><Input type="number" min="0" value={cfg.monthly} onChange={(e) => setCfg({ ...cfg, monthly: e.target.value })} /></Field>
-          <Field label="District dues (annual)"><Input type="number" min="0" value={cfg.district} onChange={(e) => setCfg({ ...cfg, district: e.target.value })} /></Field>
-          <Field label="RI charges (annual)"><Input type="number" min="0" value={cfg.ri} onChange={(e) => setCfg({ ...cfg, ri: e.target.value })} /></Field>
           <Field label="Currency symbol"><Input value={cfg.currency} onChange={(e) => setCfg({ ...cfg, currency: e.target.value })} /></Field>
           <Field label="Due day of month"><Input type="number" min="1" max="28" value={cfg.dueDay} onChange={(e) => setCfg({ ...cfg, dueDay: e.target.value })} /></Field>
           <Field label="Grace period (days)"><Input type="number" min="0" value={cfg.graceDays} onChange={(e) => setCfg({ ...cfg, graceDays: e.target.value })} /></Field>
+          <Field label="District dues (annual)"><Input type="number" min="0" value={cfg.district} onChange={(e) => setCfg({ ...cfg, district: e.target.value })} /></Field>
+          <Field label="District dues due date"><Input type="date" min={year.start} max={year.end} value={cfg.districtDueDate || ""} onChange={(e) => setCfg({ ...cfg, districtDueDate: e.target.value })} /></Field>
+          <Field label="RI charges (annual)"><Input type="number" min="0" value={cfg.ri} onChange={(e) => setCfg({ ...cfg, ri: e.target.value })} /></Field>
+          <Field label="RI charges due date"><Input type="date" min={year.start} max={year.end} value={cfg.riDueDate || ""} onChange={(e) => setCfg({ ...cfg, riDueDate: e.target.value })} /></Field>
           <Field label="Late charge"><Input type="number" min="0" value={cfg.lateFee} onChange={(e) => setCfg({ ...cfg, lateFee: e.target.value })} /></Field>
         </div>
         <Btn onClick={saveCfg}>Save configuration</Btn>
+        <p className="mt-2" style={{ fontSize: 12, color: "#9A8B93" }}>Leave a due date blank to bill each member as of the date they join instead of a fixed date.</p>
         <p className="mt-2" style={{ fontSize: 12, color: "#9A8B93" }}>Penalties and Happy Dollars are added per member from their account page.</p>
       </Sheet>
       {arrOpen && <ArrangementSheet member={arrOpen} existing={db.arrangements.find((a) => a.memberId === arrOpen.id && a.active)} onSave={saveArrangement} onClose={() => setArrOpen(null)} />}
@@ -1925,8 +1943,8 @@ function FinanceReports() {
   const monthlyHtml = () => {
     const rowsHtml = monthTx.sort((a, b) => a.date.localeCompare(b.date)).map((t) => `<tr><td>${t.date}</td><td>${t.type}</td><td>${t.category}</td><td>${t.desc}</td><td style="text-align:right">${t.type === "income" ? "" : "−"}${money(t.amount, cur)}</td></tr>`).join("");
     const arrears = db.members.filter((m) => ACTIVE_LIKE.includes(m.status)).map((m) => ({ m, a: memberAccount(db, m.id, year.id) })).filter((x) => x.a.overdue > 0);
-    return docShell(`Treasurer's report ${month}`, `
-      <h1>${db.club.name}</h1><div class="muted">Treasurer's monthly report — ${month} · Rotary year ${year.label}</div>
+    return docShell(`Treasurer's report ${fmtMonthYear(month)}`, `
+      <h1>${db.club.name}</h1><div class="muted">Treasurer's monthly report — ${fmtMonthYear(month)} · Rotary year ${year.label}</div>
       <h2>Summary</h2>
       <table><tr><th>Income</th><td>${money(mIncome, cur)}</td></tr><tr><th>Expenses</th><td>${money(mExpense, cur)}</td></tr><tr><th>Net for month</th><td class="big">${money(mIncome - mExpense, cur)}</td></tr><tr><th>Club balance (year to date)</th><td>${money(clubTotals(db, year.id).balance, cur)}</td></tr></table>
       <h2>Transactions</h2><table><tr><th>Date</th><th>Type</th><th>Category</th><th>Description</th><th>Amount</th></tr>${rowsHtml || "<tr><td colspan=5>None</td></tr>"}</table>
@@ -1948,7 +1966,7 @@ function FinanceReports() {
     <div className="flex flex-col gap-2.5 mt-4">
       <Card className="p-4">
         <div className="font-extrabold mb-2" style={{ fontFamily: DISPLAY, fontSize: 15 }}>Treasurer's monthly report</div>
-        <Select value={month} onChange={(e) => setMonth(e.target.value)}>{months.map((p) => <option key={p} value={p}>{p}</option>)}</Select>
+        <Select value={month} onChange={(e) => setMonth(e.target.value)}>{months.map((p) => <option key={p} value={p}>{fmtMonthYear(p)}</option>)}</Select>
         <div style={{ fontSize: 13, color: "#6B5A64" }} className="mt-2">Income {money(mIncome, cur)} · Expenses {money(mExpense, cur)} · Net {money(mIncome - mExpense, cur)}</div>
         <div className="flex gap-1.5 mt-2.5"><Btn small kind="quiet" onClick={() => printHtml(`Treasurer-report-${month}`, monthlyHtml())}>Save as PDF</Btn></div>
       </Card>
