@@ -18,7 +18,7 @@ const globalStyle = `
 .rc-btn:not(:disabled):hover { transform: translateY(-1px); }
 `;
 
-function Shell({ children, eyebrow = "Rotaract", title = "Club Portal", tagline }) {
+function Shell({ children, eyebrow = "Rotaract", title = "Club Portal" }) {
   return (
     <div className="min-h-screen flex flex-col items-center relative overflow-hidden" style={{ fontFamily: "'Public Sans', system-ui, sans-serif", color: INK, background: INK }}>
       <style>{globalStyle}</style>
@@ -35,7 +35,6 @@ function Shell({ children, eyebrow = "Rotaract", title = "Club Portal", tagline 
           </div>
           <div className="uppercase font-bold" style={{ fontFamily: DISPLAY, fontSize: 11, letterSpacing: ".28em", color: "rgba(255,255,255,.75)" }}>{eyebrow}</div>
           <h1 className="font-black text-white" style={{ fontFamily: DISPLAY, fontSize: 34, textShadow: "0 2px 20px rgba(0,0,0,.25)" }}>{title}</h1>
-          {tagline && <p className="mt-1.5" style={{ fontSize: 13.5, color: "rgba(255,255,255,.8)", maxWidth: 280 }}>{tagline}</p>}
         </div>
       </div>
 
@@ -89,7 +88,7 @@ function AuthScreen() {
     setBusy(false);
   };
   return (
-    <Shell tagline="Meetings, dues, projects, and members — all in one place.">
+    <Shell>
       <div className="flex gap-2 mb-5 rounded-xl p-1" style={{ background: PAPER }}>
         {[["signin", "Sign in"], ["signup", "Create account"]].map(([m, label]) => (
           <button key={m} onClick={() => setMode(m)} className="rc-btn flex-1 rounded-lg font-bold py-2.5"
@@ -120,7 +119,7 @@ function ClubSetup({ onDone, onSignOut }) {
     setBusy(false);
   };
   return (
-    <Shell tagline="One more step before you're in.">
+    <Shell>
       <div className="mb-5 font-black text-center" style={{ fontFamily: DISPLAY, fontSize: 18 }}>Join your club</div>
       <input className="rc-input" style={{ ...inputStyle, marginBottom: 16, letterSpacing: ".12em", textTransform: "lowercase" }} placeholder="Club invite code" value={code} onChange={(e) => setCode(e.target.value)} />
       <Btn onClick={go} disabled={busy || !code.trim()}>{busy ? "…" : "Join club"}</Btn>
