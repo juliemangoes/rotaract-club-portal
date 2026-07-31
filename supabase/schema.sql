@@ -66,6 +66,9 @@ create policy "members manage own push subs" on public.push_subscriptions
 -- so no direct insert/update policies are needed for them.
 
 -- ---------- RPCs ----------
+-- Admin-only: clubs are created from the Supabase dashboard (see README), not
+-- self-serve by users. Kept here for reference but NOT granted to
+-- `authenticated` below, so no signed-in user can call it via the client.
 create or replace function public.create_club(p_name text)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare cid uuid;
@@ -77,15 +80,21 @@ begin
   return cid;
 end $$;
 
+-- Whoever redeems a club's invite code first becomes its President (a
+-- brand-new club has zero members); everyone after that joins as a member
+-- pending board approval.
 create or replace function public.join_club(p_code text)
 returns uuid language plpgsql security definer set search_path = public as $$
-declare cid uuid;
+declare cid uuid; is_first boolean;
 begin
   if auth.uid() is null then raise exception 'not signed in'; end if;
   select id into cid from clubs where join_code = lower(trim(p_code));
   if cid is null then raise exception 'No club found for that invite code'; end if;
-  insert into club_members (club_id, user_id, role) values (cid, auth.uid(), 'member')
+  select not exists (select 1 from club_members where club_id = cid) into is_first;
+  insert into club_members (club_id, user_id, role)
+    values (cid, auth.uid(), case when is_first then 'president' else 'member' end)
     on conflict do nothing;
+  insert into club_data (club_id, doc) values (cid, '{}'::jsonb) on conflict do nothing;
   return cid;
 end $$;
 
@@ -101,7 +110,6 @@ begin
   return nv; -- null when the version check failed (someone saved first)
 end $$;
 
-grant execute on function public.create_club(text) to authenticated;
 grant execute on function public.join_club(text) to authenticated;
 grant execute on function public.save_club_doc(uuid, jsonb, bigint) to authenticated;
 grant execute on function public.is_club_member(uuid) to authenticated;

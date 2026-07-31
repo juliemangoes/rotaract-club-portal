@@ -74,45 +74,24 @@ function AuthScreen() {
 }
 
 function ClubSetup({ onDone, onSignOut }) {
-  const [mode, setMode] = useState("join");
-  const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const go = async () => {
     setBusy(true); setMsg("");
     try {
-      if (mode === "create") {
-        const { error } = await supabase.rpc("create_club", { p_name: name.trim() });
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.rpc("join_club", { p_code: code.trim().toLowerCase() });
-        if (error) throw error;
-      }
+      const { error } = await supabase.rpc("join_club", { p_code: code.trim().toLowerCase() });
+      if (error) throw error;
       onDone();
     } catch (e) { setMsg(e.message); }
     setBusy(false);
   };
   return (
     <Shell>
-      <div className="flex gap-2 mb-5">
-        {[["join", "Join a club"], ["create", "Start a club"]].map(([m, label]) => (
-          <button key={m} onClick={() => setMode(m)} className="flex-1 rounded-xl font-bold py-2.5"
-            style={{ fontFamily: DISPLAY, fontSize: 14, background: mode === m ? INK : "#fff", color: mode === m ? "#fff" : "#6B5A64", border: `1.5px solid ${mode === m ? INK : LINE}` }}>{label}</button>
-        ))}
-      </div>
-      {mode === "join" ? (
-        <>
-          <input style={{ ...inputStyle, marginBottom: 16, letterSpacing: ".12em", textTransform: "lowercase" }} placeholder="Club invite code" value={code} onChange={(e) => setCode(e.target.value)} />
-          <Btn onClick={go} disabled={busy || !code.trim()}>{busy ? "…" : "Join club"}</Btn>
-          <p className="mt-3 text-center" style={{ fontSize: 12.5, color: "#9A8B93" }}>Ask an officer for the invite code (Club settings → invite code). After joining, the board approves your membership.</p>
-        </>
-      ) : (
-        <>
-          <input style={{ ...inputStyle, marginBottom: 16 }} placeholder="Club name (e.g. Rotaract Club of Corozal)" value={name} onChange={(e) => setName(e.target.value)} />
-          <Btn onClick={go} disabled={busy || !name.trim()}>{busy ? "…" : "Create club — you become President"}</Btn>
-        </>
-      )}
+      <div className="mb-5 font-black text-center" style={{ fontFamily: DISPLAY, fontSize: 18 }}>Join your club</div>
+      <input style={{ ...inputStyle, marginBottom: 16, letterSpacing: ".12em", textTransform: "lowercase" }} placeholder="Club invite code" value={code} onChange={(e) => setCode(e.target.value)} />
+      <Btn onClick={go} disabled={busy || !code.trim()}>{busy ? "…" : "Join club"}</Btn>
+      <p className="mt-3 text-center" style={{ fontSize: 12.5, color: "#9A8B93" }}>Ask your club administrator for the invite code. The first person to join with a new club's code becomes its President; after that, the board approves each new member.</p>
       {msg && <p className="mt-3 text-center" style={{ fontSize: 13, color: "#C22F2F" }}>{msg}</p>}
       <div className="mt-6"><Btn quiet onClick={onSignOut}>Sign out</Btn></div>
     </Shell>

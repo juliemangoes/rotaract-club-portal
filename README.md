@@ -63,14 +63,27 @@ by default.
 
 ## 5. First run — how a club onboards
 
-1. **President** creates an account → **Start a club** → becomes President of a fresh club.
-2. In **Finance → Dues → Configure**, set monthly/district/RI dues, due day, grace period.
-3. In **More → Club settings**, find the **invite code**; share it in the club group chat.
-4. **Members** create accounts (with the email the club knows them by!) → **Join a club**
+Clubs are **not** self-service — there's no "Start a club" button in the app. An
+administrator creates each club from the Supabase dashboard, then hands the invite
+code to that club's founding President.
+
+1. **Admin**: Supabase dashboard → **SQL Editor**, run:
+   ```sql
+   insert into public.clubs (name) values ('Rotaract Club of ...') returning id, join_code;
+   insert into public.club_data (club_id, doc) values ('<id-from-above>', '{}'::jsonb);
+   ```
+   Note the returned `join_code`.
+2. **Admin** sends that invite code to the intended President.
+3. **President** creates an account in the app → **Join a club** → enters the code.
+   Since the club has no members yet, they're automatically made President.
+4. In **Finance → Dues → Configure**, set monthly/district/RI dues, due day, grace period.
+5. In **More → Club settings**, the President finds the same **invite code**; shares it
+   in the club group chat for everyone else.
+6. **Members** create accounts (with the email the club knows them by!) → **Join a club**
    → enter the code. They appear under **Members** as *Applied*.
-5. Any EBOD member opens their profile → **Approve as active member**, assigns roles
+7. Any EBOD member opens their profile → **Approve as active member**, assigns roles
    (Secretary, Treasurer, …) — the app's permissions follow those roles.
-6. Members install the app: browser menu → **Add to Home Screen** (the PWA prompt).
+8. Members install the app: browser menu → **Add to Home Screen** (the PWA prompt).
 
 If a member signs up with an email that already matches a member record in the club
 document, their account links to that record automatically — so you can pre-create
