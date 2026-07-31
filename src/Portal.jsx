@@ -783,7 +783,6 @@ function LoginScreen({ db, onSignIn, persist }) {
         <div className="relative">
           <div className="uppercase font-bold mb-1" style={{ fontFamily: DISPLAY, fontSize: 11, letterSpacing: ".22em", color: "rgba(255,255,255,.8)" }}>Rotaract</div>
           <h1 className="font-black text-white" style={{ fontFamily: DISPLAY, fontSize: 34, lineHeight: 1.05 }}>Club Portal</h1>
-          <p className="mt-2" style={{ color: "rgba(255,255,255,.85)", fontSize: 14.5, maxWidth: 290 }}>Meetings, projects, finances, and members — organized by Rotary year.</p>
         </div>
       </div>
       <div className="flex-1 px-4 pt-5 pb-10">
@@ -848,7 +847,7 @@ function NotificationsSheet({ onClose }) {
   return (
     <Sheet open onClose={onClose} title="Notifications" tall>
       <div className="flex justify-end mb-2"><Btn small kind="quiet" onClick={() => setOverlay({ type: "notifPrefs" })}>Preferences</Btn></div>
-      {list.length === 0 ? <Empty icon="bell" title="Nothing yet" text="Club activity lands here — meetings, dues, projects, and more." /> : (
+      {list.length === 0 ? <Empty icon="bell" title="Nothing yet" text="Club activity will appear here." /> : (
         <div className="flex flex-col gap-2">
           {list.map((n) => (
             <Card key={n.id} className="flex gap-3 p-3.5">

@@ -17,7 +17,7 @@ export default defineConfig({
       manifest: {
         name: "Rotaract Club Portal",
         short_name: "Rotaract",
-        description: "Meetings, projects, finances, and members — organized by Rotary year.",
+        description: "Club management for Rotaract clubs, organized by Rotary year.",
         theme_color: "#D41367",
         background_color: "#F6F3F5",
         display: "standalone",
