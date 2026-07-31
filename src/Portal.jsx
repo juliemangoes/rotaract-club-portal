@@ -122,9 +122,19 @@ function docShell(title, inner, accent) {
   table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px} th,td{border:1px solid #ddd;padding:6px 8px;text-align:left}
   th{background:${accent}14} .muted{color:#8A7580;font-size:12px} .big{font-size:26px;font-weight:800}
   @media print{body{margin:0}}
-  </style></head><body>${inner}<p class="muted">Generated ${new Date().toLocaleString()} · Open this file and print to PDF for an official copy.</p></body></html>`;
+  </style></head><body>${inner}<p class="muted">Generated ${new Date().toLocaleString()}</p></body></html>`;
 }
 function exportHtml(name, title, inner, accent) { downloadBlob(name + ".html", docShell(title, inner, accent || CRAN), "text/html"); }
+// Opens a print-ready view (a complete docShell() document) and triggers the
+// browser's print dialog, whose "Save as PDF" destination is what actually
+// produces a PDF on mobile.
+function printHtml(name, html) {
+  const w = window.open("", "_blank");
+  if (!w) { downloadBlob(`${name}.html`, html, "text/html"); return; }
+  w.document.write(html);
+  w.document.close();
+  w.onload = () => { w.focus(); w.print(); };
+}
 
 /* File handling: cloud storage when configured, small base64 files in local demo mode */
 const MAX_FILE_KB = 400;           // demo-mode cap (files live inside the club document)
@@ -1555,7 +1565,7 @@ function MemberAccountBody({ memberId }) {
                 <div style={{ fontSize: 11.5, color: "#8A7580" }}>{fmtShort(l.date)}</div>
               </div>
               <div className="font-bold" style={{ fontSize: 13.5, color: l.amount > 0 ? "#8A5A00" : OK }}>{l.amount > 0 ? "+" : "−"}{money(Math.abs(l.amount), cur)}</div>
-              {l.pay && <button onClick={() => downloadBlob(`Receipt-${l.pay.receiptNo}.html`, receiptHtml(db, l.pay, member), "text/html")} aria-label="Download receipt" style={{ color: AZURE }}><Icon name="download" size={16} /></button>}
+              {l.pay && <button onClick={() => printHtml(`Receipt-${l.pay.receiptNo}`, receiptHtml(db, l.pay, member))} aria-label="Save receipt as PDF" style={{ color: AZURE }}><Icon name="download" size={16} /></button>}
             </div>
           ))}
         </Card>
@@ -1586,7 +1596,7 @@ function PaymentSheet({ memberId, onClose }) {
       audit(d, "Payment recorded", `${member.name} · ${money(Number(f.amount), d.duesConfig.currency)} · ${receiptNo}`);
     });
     showToast(`Recorded — receipt ${receiptNo}`);
-    downloadBlob(`Receipt-${receiptNo}.html`, receiptHtml(db, { ...payRec }, member), "text/html");
+    printHtml(`Receipt-${receiptNo}`, receiptHtml(db, { ...payRec }, member));
     onClose();
   };
   return (
@@ -1916,7 +1926,7 @@ function FinanceReports() {
       <div className="font-extrabold" style={{ fontFamily: DISPLAY, fontSize: 15 }}>{title}</div>
       <div style={{ fontSize: 12.5, color: "#8A7580" }}>{desc}</div>
       <div className="flex gap-1.5 mt-2.5 flex-wrap">
-        {htmlFn && <Btn small kind="quiet" onClick={() => downloadBlob(`${name}.html`, htmlFn(), "text/html")}>PDF (print)</Btn>}
+        {htmlFn && <Btn small kind="quiet" onClick={() => printHtml(name, htmlFn())}>Save as PDF</Btn>}
         {rows && <Btn small kind="quiet" onClick={() => exportCsv(name, rows())}>CSV</Btn>}
         {rows && <Btn small kind="quiet" onClick={() => exportXlsx(name, rows())}>Excel</Btn>}
       </div>
@@ -1928,12 +1938,12 @@ function FinanceReports() {
         <div className="font-extrabold mb-2" style={{ fontFamily: DISPLAY, fontSize: 15 }}>Treasurer's monthly report</div>
         <Select value={month} onChange={(e) => setMonth(e.target.value)}>{months.map((p) => <option key={p} value={p}>{p}</option>)}</Select>
         <div style={{ fontSize: 13, color: "#6B5A64" }} className="mt-2">Income {money(mIncome, cur)} · Expenses {money(mExpense, cur)} · Net {money(mIncome - mExpense, cur)}</div>
-        <div className="flex gap-1.5 mt-2.5"><Btn small kind="quiet" onClick={() => downloadBlob(`Treasurer-report-${month}.html`, monthlyHtml(), "text/html")}>PDF (print)</Btn></div>
+        <div className="flex gap-1.5 mt-2.5"><Btn small kind="quiet" onClick={() => printHtml(`Treasurer-report-${month}`, monthlyHtml())}>Save as PDF</Btn></div>
       </Card>
       <ReportRow title="Member arrears report" desc="Every member's charges, payments, balance, and overdue amount." rows={arrearsRows} name={`Arrears-${year.id}`} />
       <ReportRow title="Income & expense statement" desc="Full-year statement with running totals." rows={stmtRows} name={`Statement-${year.id}`} />
       <ReportRow title="Project financial report" desc="Budget vs actual income and spend per project." rows={projectRows} name={`Projects-financial-${year.id}`} />
-      <p style={{ fontSize: 12, color: "#9A8B93" }}>PDF exports download as print-ready HTML — open and print to PDF. CSV/Excel open in any spreadsheet.</p>
+      <p style={{ fontSize: 12, color: "#9A8B93" }}>"Save as PDF" opens your device's print dialog — choose "Save as PDF" as the destination. CSV/Excel open in any spreadsheet.</p>
     </div>
   );
 }
@@ -3172,7 +3182,7 @@ function YearManager({ onClose }) {
         <div className="font-black" style={{ fontFamily: DISPLAY, fontSize: 24 }}>{year.label}</div>
         <div style={{ fontSize: 12.5, color: "#8A7580" }}>{fmtDate(year.start)} → {fmtDate(year.end)} · only one year is active at a time</div>
         <div className="flex gap-1.5 mt-3 flex-wrap">
-          <Btn small kind="quiet" onClick={() => downloadBlob(`Year-end-${year.id}.html`, yearEndReportHtml(db, year), "text/html")}>Year-end report</Btn>
+          <Btn small kind="quiet" onClick={() => printHtml(`Year-end-${year.id}`, yearEndReportHtml(db, year))}>Year-end report</Btn>
           {isPres && <Btn small kind="dark" onClick={() => { setStep(0); setWizard(true); }}>Start {ryLabel(nextStartYear)} →</Btn>}
         </div>
       </Card>
@@ -3188,7 +3198,7 @@ function YearManager({ onClose }) {
             <div style={{ fontSize: 12.5, color: "#8A7580" }} className="mt-0.5">
               {db.meetings.filter((m) => m.yearId === y.id).length} meetings · {db.projects.filter((p) => p.yearId === y.id).length} projects · net {money(t.balance, db.duesConfig.currency)}
             </div>
-            <div className="mt-2"><Btn small kind="quiet" onClick={() => downloadBlob(`Year-end-${y.id}.html`, yearEndReportHtml(db, y), "text/html")}>Download year-end report</Btn></div>
+            <div className="mt-2"><Btn small kind="quiet" onClick={() => printHtml(`Year-end-${y.id}`, yearEndReportHtml(db, y))}>Download year-end report</Btn></div>
           </Card>
         );
       })}
