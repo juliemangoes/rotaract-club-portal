@@ -125,15 +125,27 @@ function docShell(title, inner, accent) {
   </style></head><body>${inner}<p class="muted">Generated ${new Date().toLocaleString()}</p></body></html>`;
 }
 function exportHtml(name, title, inner, accent) { downloadBlob(name + ".html", docShell(title, inner, accent || CRAN), "text/html"); }
-// Opens a print-ready view (a complete docShell() document) and triggers the
-// browser's print dialog, whose "Save as PDF" destination is what actually
-// produces a PDF on mobile.
+// Prints a complete docShell() document via a hidden iframe (rather than
+// window.open, which installed/standalone PWAs block — there's no "new tab"
+// in standalone mode, so it silently fell back to an .html download there).
+// The browser's print dialog then offers "Save as PDF" as a destination.
 function printHtml(name, html) {
-  const w = window.open("", "_blank");
-  if (!w) { downloadBlob(`${name}.html`, html, "text/html"); return; }
-  w.document.write(html);
-  w.document.close();
-  w.onload = () => { w.focus(); w.print(); };
+  const cleanup = (iframe) => { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); };
+  try {
+    const iframe = document.createElement("iframe");
+    Object.assign(iframe.style, { position: "fixed", right: 0, bottom: 0, width: 0, height: 0, border: 0 });
+    document.body.appendChild(iframe);
+    iframe.onload = () => {
+      const win = iframe.contentWindow;
+      win.onafterprint = () => cleanup(iframe);
+      win.focus();
+      win.print();
+      setTimeout(() => cleanup(iframe), 60000); // fallback if afterprint never fires
+    };
+    iframe.srcdoc = html;
+  } catch (e) {
+    downloadBlob(`${name}.html`, html, "text/html");
+  }
 }
 
 /* File handling: cloud storage when configured, small base64 files in local demo mode */
