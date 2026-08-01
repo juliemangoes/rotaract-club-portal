@@ -32,14 +32,19 @@ button:focus-visible{outline:2px solid ${AZURE}; outline-offset:2px}
 `;
 
 /* ============ Domain constants ============ */
-const ROLES = ["President", "Vice President", "Secretary", "Treasurer", "Past President", "Sergeant-at-Arms", "Board Member", "Member", "Prospect"];
+const ROLES = ["President", "Vice President", "Secretary", "Treasurer", "Past President", "Sergeant-at-Arms", "Board Member", "Member", "Prospect", "Volunteer", "Guest"];
 const EBOD = ["President", "Vice President", "Secretary", "Treasurer", "Past President"];
 const ROLE_COLOR = {
   President: "#D41367", "Vice President": "#0067C8", Secretary: "#B07400", Treasurer: "#1E8E5A",
   "Past President": "#7A4BA6", "Sergeant-at-Arms": "#B34700", "Board Member": "#0E8F8F", Member: "#6B5A64", Prospect: "#9A8B93",
+  Volunteer: "#0E8F8F", Guest: "#8A7580",
 };
-const MEMBER_STATUSES = ["Active", "Prospect", "Applied", "Invited", "On Leave", "Transferred", "Resigned", "Alumni", "Inactive"];
+// Guests and Volunteers carry no financial obligations (excluded from ACTIVE_LIKE, so dues never generate for them)
+// and never appear in monthly/district/RI billing. A Guest becomes a Prospect automatically after attending
+// GUEST_EVENTS_FOR_PROSPECT events of any kind; only Prospect+ members may propose or apply for projects.
+const MEMBER_STATUSES = ["Active", "Prospect", "Guest", "Volunteer", "Applied", "Invited", "On Leave", "Transferred", "Resigned", "Alumni", "Inactive"];
 const ACTIVE_LIKE = ["Active", "On Leave"];
+const GUEST_EVENTS_FOR_PROSPECT = 4;
 const AREAS = ["Peacebuilding & Conflict Prevention", "Disease Prevention & Treatment", "Water, Sanitation & Hygiene", "Maternal & Child Health", "Basic Education & Literacy", "Community Economic Development", "Environment"];
 const TX_CATS = ["Dues", "Fundraising", "Donations", "Grants", "Events", "Service Projects", "Supplies", "Venue", "Transport", "Fees", "Other"];
 const PAY_METHODS = ["Cash", "Bank transfer", "Cheque", "Mobile money", "Card", "Other"];
@@ -362,6 +367,25 @@ function ensureObligations(d) {
   });
   return changed;
 }
+// Total meetings (of any kind) a member was marked present/late/virtual at.
+function eventsAttendedCount(d, memberId) {
+  return d.meetings.filter((m) => m.status === "published" && ["present", "late", "virtual"].includes((m.attendance || {})[memberId])).length;
+}
+// A Guest is auto-promoted to Prospect once they've attended enough events, at which
+// point they become eligible to propose or apply for projects.
+function ensureGuestPromotions(d) {
+  let changed = false;
+  d.members.filter((m) => m.status === "Guest").forEach((m) => {
+    const n = eventsAttendedCount(d, m.id);
+    if (n < GUEST_EVENTS_FOR_PROSPECT) return;
+    m.statusHistory.push({ id: uid(), from: "Guest", to: "Prospect", note: `Attended ${n} events`, at: Date.now(), by: "system" });
+    m.status = "Prospect";
+    if (m.role === "Guest") m.role = "Prospect";
+    d.notifications.unshift({ id: uid(), ts: Date.now(), type: "membership", title: "Guest became a Prospect", body: `${m.name} attended ${n} events and can now apply for projects and club membership.` });
+    changed = true;
+  });
+  return changed;
+}
 function memberAccount(d, memberId, yearId) {
   const ch = d.charges.filter((c) => c.memberId === memberId && c.yearId === yearId && !c.reversed);
   const pays = d.payments.filter((p) => p.memberId === memberId && p.yearId === yearId && !p.reversed);
@@ -606,6 +630,7 @@ export default function Portal({ clubId = "demo", demo = false, userEmail = "", 
       if (!d || d.v !== 2) d = demo ? seedDb() : seedProductionDb(clubName, { name: userName, email: userEmail });
       d.meetings.forEach((m) => { if (!m.kind) m.kind = "general"; if (m.projectId === undefined) m.projectId = ""; });
       ensureObligations(d);
+      ensureGuestPromotions(d);
       await saveShared("doc", d);
 
       if (demo) {
@@ -1212,7 +1237,8 @@ function MeetingDetail({ id, onClose }) {
   const [guestKind, setGuestKind] = useState("guest");
   if (!m) return null;
   const t = todayStr();
-  const activeMembers = db.members.filter((x) => ACTIVE_LIKE.includes(x.status));
+  // Anyone who can be marked present: full members plus Guests/Prospects/Volunteers being tracked toward membership.
+  const attendanceRoster = db.members.filter((x) => ACTIVE_LIKE.includes(x.status) || ["Guest", "Prospect", "Volunteer"].includes(x.status));
   const att = m.attendance || {};
   const counts = {}; ATT_STATUSES.forEach((s) => (counts[s] = 0)); Object.values(att).forEach((v) => { if (counts[v] !== undefined) counts[v]++; });
   const rsvpOpen = m.status === "published" && m.date >= t && (!m.rsvpDeadline || m.rsvpDeadline >= t);
@@ -1221,6 +1247,7 @@ function MeetingDetail({ id, onClose }) {
   const setAtt = (mid, val) => patch((d) => {
     const mt = d.meetings.find((x) => x.id === id);
     if (val) mt.attendance[mid] = val; else delete mt.attendance[mid];
+    ensureGuestPromotions(d);
   });
   const rsvp = (v) => patch((d) => { const mt = d.meetings.find((x) => x.id === id); mt.rsvps = mt.rsvps || {}; mt.rsvps[me.id] = v; });
   const cancelMeeting = () => {
@@ -1285,7 +1312,7 @@ function MeetingDetail({ id, onClose }) {
         <>
           <div className="flex gap-1.5 mb-2 flex-wrap">{ATT_STATUSES.map((s) => counts[s] > 0 && <Badge key={s} color={ATT_COLOR[s]}>{counts[s]} {s}</Badge>)}</div>
           <Card className="p-2">
-            {activeMembers.map((mb, i) => (
+            {attendanceRoster.map((mb, i) => (
               <div key={mb.id} className="px-2 py-2" style={{ borderTop: i ? `1px solid ${LINE}` : "none" }}>
                 <div className="flex items-center gap-2.5">
                   <Avatar m={mb} size={30} />
@@ -2058,7 +2085,8 @@ function ProjectsTab() {
   const { db, me, setOverlay } = useApp();
   const [propose, setPropose] = useState(null); // null | {} | draft project
   const [filter, setFilter] = useState("all");
-  const canPropose = !["Applied", "Invited", "Resigned", "Transferred"].includes(me.status) || me.status === "Prospect";
+  // Guests can't propose or apply for projects until they're promoted to Prospect (see GUEST_EVENTS_FOR_PROSPECT).
+  const canPropose = !["Applied", "Invited", "Resigned", "Transferred", "Guest"].includes(me.status);
   const visible = db.projects.filter((p) => p.status !== "Draft" || p.submittedBy === me.id);
   const filtered = visible.filter((p) => filter === "all" ? true : filter === "active" ? p.status === "Approved" : filter === "review" ? ["Submitted", "Under Review", "Returned", "Pending Close"].includes(p.status) : filter === "drafts" ? p.status === "Draft" : ["Completed", "Denied"].includes(p.status));
   const sorted = [...filtered].sort((a, b) => b.at - a.at);
@@ -2254,11 +2282,14 @@ function ProjectDetail({ id, onClose }) {
   const logHours = () => { if (!Number(hrs)) return; up((pr) => pr.serviceHours.push({ id: uid(), memberId: me.id, hours: Number(hrs), date: todayStr() })); setHrs(""); showToast("Service hours logged"); };
   const addRisk = () => { if (!riskText.trim()) return; up((pr) => pr.risksLog.push({ id: uid(), by: me.id, text: riskText.trim(), at: Date.now(), resolved: false })); setRiskText(""); };
   const addMilestone = () => { if (!msT.trim()) return; up((pr) => pr.milestones.push({ id: uid(), title: msT.trim(), date: msD, done: false })); setMsT(""); setMsD(""); };
-  const joinRole = (rid) => up((pr, d) => {
-    const r = pr.volunteerRoles.find((x) => x.id === rid);
-    if (r.filled.includes(me.id)) r.filled = r.filled.filter((x) => x !== me.id);
-    else if (r.filled.length < r.slots) { r.filled.push(me.id); notify(d, { type: "projects", title: "Volunteer signed up", body: `${me.name} took "${r.title}" on ${pr.title}.` }); }
-  });
+  const joinRole = (rid) => {
+    if (me.status === "Guest") { showToast("Guests can't sign up yet. Attend more events to become a Prospect."); return; }
+    up((pr, d) => {
+      const r = pr.volunteerRoles.find((x) => x.id === rid);
+      if (r.filled.includes(me.id)) r.filled = r.filled.filter((x) => x !== me.id);
+      else if (r.filled.length < r.slots) { r.filled.push(me.id); notify(d, { type: "projects", title: "Volunteer signed up", body: `${me.name} took "${r.title}" on ${pr.title}.` }); }
+    });
+  };
 
   return (
     <FullScreen title={p.title} onClose={onClose} accent={p.status === "Approved" ? AZURE : CRAN}>
@@ -2473,7 +2504,7 @@ function ProjectDetail({ id, onClose }) {
             <Card key={r.id} className="p-3.5 mb-2">
               <div className="flex items-center justify-between">
                 <div><div className="font-bold" style={{ fontSize: 14 }}>{r.title}</div><div style={{ fontSize: 12, color: "#8A7580" }}>{r.filled.length}/{r.slots} filled{r.filled.length ? " — " + r.filled.map((x) => memberById(x)?.name.split(" ")[0]).join(", ") : ""}</div></div>
-                {p.status === "Approved" && <Btn small kind={r.filled.includes(me.id) ? "quiet" : "blue"} onClick={() => joinRole(r.id)} disabled={!r.filled.includes(me.id) && r.filled.length >= r.slots}>{r.filled.includes(me.id) ? "Leave" : "Sign up"}</Btn>}
+                {p.status === "Approved" && me.status !== "Guest" && <Btn small kind={r.filled.includes(me.id) ? "quiet" : "blue"} onClick={() => joinRole(r.id)} disabled={!r.filled.includes(me.id) && r.filled.length >= r.slots}>{r.filled.includes(me.id) ? "Leave" : "Sign up"}</Btn>}
               </div>
             </Card>
           )) : <Empty icon="users" title="No positions posted" />}
@@ -2585,7 +2616,8 @@ function TaskSheet({ project, task, onClose }) {
   const canEdit = isLead;                          // only the project lead assigns & structures tasks
   const canWork = isLead || f.assignee === me.id;  // only the assignee (or lead) progresses the task
   const team = [...new Set([project.lead, ...project.volunteerRoles.flatMap((r) => r.filled), ...project.tasks.map((t) => t.assignee)])].filter(Boolean);
-  const assignables = db.members.filter((m) => ACTIVE_LIKE.includes(m.status)).slice().sort((x, y) => (team.includes(y.id) ? 1 : 0) - (team.includes(x.id) ? 1 : 0));
+  // Prospects and Volunteers can join a project's team, so they're assignable too; Guests can't join projects at all.
+  const assignables = db.members.filter((m) => ACTIVE_LIKE.includes(m.status) || ["Prospect", "Volunteer"].includes(m.status)).slice().sort((x, y) => (team.includes(y.id) ? 1 : 0) - (team.includes(x.id) ? 1 : 0));
 
   const save = () => {
     if (!f.title.trim() || (!canWork && !canEdit)) return;
@@ -2771,21 +2803,28 @@ function ProposeReopen({ p }) {
 function MembersScreen({ onClose }) {
   const { db, year, isEBOD, patch, me, notify, audit, showToast, setOverlay, memberById } = useApp();
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [iv, setIv] = useState({ name: "", email: "" });
+  const [iv, setIv] = useState({ name: "", email: "", kind: "Prospect" });
   const groups = [
     ["Executive board", db.members.filter((m) => EBOD.includes(m.role) && ACTIVE_LIKE.includes(m.status))],
     ["Members", db.members.filter((m) => !EBOD.includes(m.role) && ACTIVE_LIKE.includes(m.status))],
-    ["Prospects & applications", db.members.filter((m) => ["Prospect", "Applied", "Invited"].includes(m.status))],
+    ["Volunteers", db.members.filter((m) => m.status === "Volunteer")],
+    ["Guests & prospects", db.members.filter((m) => ["Guest", "Prospect", "Applied", "Invited"].includes(m.status))],
     ["Former / inactive", db.members.filter((m) => ["Transferred", "Resigned", "Alumni", "Inactive"].includes(m.status))],
   ];
+  const INVITE_KINDS = {
+    Prospect: { role: "Prospect", status: "Invited", title: "Prospect invited", body: (n) => `${n} was invited to visit the club.` },
+    Guest: { role: "Guest", status: "Guest", title: "Guest added", body: (n) => `${n} was added as a guest. They'll become a Prospect after attending ${GUEST_EVENTS_FOR_PROSPECT} events.` },
+    Volunteer: { role: "Volunteer", status: "Volunteer", title: "Volunteer added", body: (n) => `${n} was added as a volunteer.` },
+  };
   const invite = () => {
     if (!iv.name.trim()) return;
+    const k = INVITE_KINDS[iv.kind];
     patch((d) => {
-      d.members.push({ id: uid(), name: iv.name.trim(), email: iv.email.trim(), phone: "", role: "Prospect", status: "Invited", joined: todayStr(), ...blankMemberExtras() });
-      notify(d, { type: "membership", title: "Prospect invited", body: `${iv.name.trim()} was invited to visit the club.` });
-      audit(d, "Prospect invited", iv.name.trim());
+      d.members.push({ id: uid(), name: iv.name.trim(), email: iv.email.trim(), phone: "", role: k.role, status: k.status, joined: todayStr(), ...blankMemberExtras() });
+      notify(d, { type: "membership", title: k.title, body: k.body(iv.name.trim()) });
+      audit(d, k.title, iv.name.trim());
     });
-    setIv({ name: "", email: "" }); setInviteOpen(false); showToast("Invitation recorded");
+    setIv({ name: "", email: "", kind: "Prospect" }); setInviteOpen(false); showToast(`${iv.kind} added`);
   };
   const exportReport = (fmt) => {
     const rows = [["Name", "Role", "Status", "Email", "Phone", "Joined", "Rotary ID", "Attendance %", "Service hours", "Dues balance", "Overdue", "Committees"]];
@@ -2821,10 +2860,18 @@ function MembersScreen({ onClose }) {
           </div>
         </div>
       ))}
-      <Sheet open={inviteOpen} onClose={() => setInviteOpen(false)} title="Invite a prospect">
+      <Sheet open={inviteOpen} onClose={() => setInviteOpen(false)} title="Add someone">
+        <Field label="Add as">
+          <Chips options={Object.keys(INVITE_KINDS).map((k) => ({ id: k, label: k }))} value={iv.kind} onChange={(k) => setIv({ ...iv, kind: k })} />
+        </Field>
         <Field label="Full name"><Input value={iv.name} onChange={(e) => setIv({ ...iv, name: e.target.value })} /></Field>
         <Field label="Email"><Input value={iv.email} onChange={(e) => setIv({ ...iv, email: e.target.value })} /></Field>
-        <Btn onClick={invite} disabled={!iv.name.trim()}>Record invitation</Btn>
+        <p className="mb-3" style={{ fontSize: 12, color: "#9A8B93" }}>
+          {iv.kind === "Prospect" && "They'll appear under Members as Invited, ready for the board to approve."}
+          {iv.kind === "Guest" && `They can attend events but can't apply for projects yet. After ${GUEST_EVENTS_FOR_PROSPECT} events, they automatically become a Prospect.`}
+          {iv.kind === "Volunteer" && "They can apply for projects right away. No dues or financial obligations."}
+        </p>
+        <Btn onClick={invite} disabled={!iv.name.trim()}>Add {iv.kind.toLowerCase()}</Btn>
       </Sheet>
     </FullScreen>
   );
@@ -2861,6 +2908,7 @@ function MemberProfile({ id, onClose }) {
       mm.statusHistory.push({ id: uid(), from: mm.status, to: status, note, at: Date.now(), by: me.name });
       mm.status = status;
       if (status === "Active" && mm.role === "Prospect") mm.role = "Member";
+      if (status === "Prospect" && mm.role === "Guest") mm.role = "Prospect";
       notify(d, { type: "membership", title: "Membership update", body: `${mm.name}: ${status}${note ? ` — ${note}` : ""}.` });
       audit(d, "Membership status changed", `${mm.name} → ${status}`);
     });
@@ -2888,7 +2936,12 @@ function MemberProfile({ id, onClose }) {
           <Card key={k} className="p-3 text-center"><div className="font-black" style={{ fontFamily: DISPLAY, fontSize: 17, color: k === "Dues" ? (acct.overdue > 0 ? BAD : acct.balance > 0 ? "#8A5A00" : OK) : INK }}>{v}</div><div style={{ fontSize: 10.5, color: "#8A7580" }} className="font-bold uppercase">{k}</div></Card>
         ))}
       </div>
-      {(self || isEBOD) && <div className="mt-2.5"><Btn kind="ghost" small onClick={() => setOverlay({ type: "myAccount", id: m.id })}>View dues account & receipts</Btn></div>}
+      {(self || isEBOD) && !["Guest", "Volunteer"].includes(m.status) && <div className="mt-2.5"><Btn kind="ghost" small onClick={() => setOverlay({ type: "myAccount", id: m.id })}>View dues account & receipts</Btn></div>}
+      {m.status === "Guest" && (
+        <Card className="p-3 mt-2.5" style={{ borderColor: GOLD, background: GOLD + "0e" }}>
+          <div style={{ fontSize: 12.5, color: "#8A5A00" }}><b>{eventsAttendedCount(db, m.id)}/{GUEST_EVENTS_FOR_PROSPECT}</b> events attended. Becomes a Prospect automatically once they reach {GUEST_EVENTS_FOR_PROSPECT}, and can then apply for projects.</div>
+        </Card>
+      )}
 
       <SectionTitle>Profile</SectionTitle>
       <Card className="p-4">
