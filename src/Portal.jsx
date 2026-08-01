@@ -45,6 +45,7 @@ const ROLE_COLOR = {
 const MEMBER_STATUSES = ["Active", "Prospect", "Guest", "Volunteer", "Applied", "Invited", "On Leave", "Transferred", "Resigned", "Alumni", "Inactive"];
 const ACTIVE_LIKE = ["Active", "On Leave"];
 const GUEST_EVENTS_FOR_PROSPECT = 4;
+const DUES_EXEMPT_STATUSES = ["Guest", "Volunteer", "Prospect"];
 const AREAS = ["Peacebuilding & Conflict Prevention", "Disease Prevention & Treatment", "Water, Sanitation & Hygiene", "Maternal & Child Health", "Basic Education & Literacy", "Community Economic Development", "Environment"];
 const TX_CATS = ["Dues", "Fundraising", "Donations", "Grants", "Events", "Service Projects", "Supplies", "Venue", "Transport", "Fees", "Other"];
 const PAY_METHODS = ["Cash", "Bank transfer", "Cheque", "Mobile money", "Card", "Other"];
@@ -381,9 +382,17 @@ function ensureGuestPromotions(d) {
     m.statusHistory.push({ id: uid(), from: "Guest", to: "Prospect", note: `Attended ${n} events`, at: Date.now(), by: "system" });
     m.status = "Prospect";
     if (m.role === "Guest") m.role = "Prospect";
+    waiveOutstandingCharges(d, m.id);
     d.notifications.unshift({ id: uid(), ts: Date.now(), type: "membership", title: "Guest became a Prospect", body: `${m.name} attended ${n} events and can now apply for projects and club membership.` });
     changed = true;
   });
+  return changed;
+}
+// Guests, Volunteers, and Prospects owe nothing: clears any charges left over from
+// before they held one of these statuses (e.g. a former Active member stepping back).
+function waiveOutstandingCharges(d, memberId) {
+  let changed = false;
+  d.charges.filter((c) => c.memberId === memberId && !c.reversed).forEach((c) => { c.reversed = true; changed = true; });
   return changed;
 }
 function memberAccount(d, memberId, yearId) {
@@ -2909,6 +2918,7 @@ function MemberProfile({ id, onClose }) {
       mm.status = status;
       if (status === "Active" && mm.role === "Prospect") mm.role = "Member";
       if (status === "Prospect" && mm.role === "Guest") mm.role = "Prospect";
+      if (DUES_EXEMPT_STATUSES.includes(status)) waiveOutstandingCharges(d, mm.id);
       notify(d, { type: "membership", title: "Membership update", body: `${mm.name}: ${status}${note ? ` — ${note}` : ""}.` });
       audit(d, "Membership status changed", `${mm.name} → ${status}`);
     });
