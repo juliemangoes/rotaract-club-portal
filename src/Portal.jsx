@@ -176,12 +176,16 @@ function readFileAsDataUrl(file, cb, onErr) {
 /* ============ Storage (Supabase-backed; localStorage in demo mode) ============ */
 let CLUB_ID = "demo";
 let _freshHandler = null; // called when a save loses an optimistic-concurrency race
+let _saveErrorHandler = null; // called when a save fails for any other reason (network, RLS, ...)
 async function loadShared(_key, fallback) {
   try { const d = await getClubDoc(CLUB_ID); return d ?? fallback; } catch (e) { console.error(e); return fallback; }
 }
 async function saveShared(_key, val) {
   try { await saveClubDoc(CLUB_ID, val); }
-  catch (e) { if (e && e.fresh && _freshHandler) _freshHandler(e.fresh); else console.error(e); }
+  catch (e) {
+    if (e && e.fresh && _freshHandler) _freshHandler(e.fresh);
+    else { console.error(e); if (_saveErrorHandler) _saveErrorHandler(); }
+  }
 }
 function loadMine(key, fallback) {
   try { const v = localStorage.getItem(`rotaract:${CLUB_ID}:${key}`); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; }
@@ -677,6 +681,7 @@ export default function Portal({ clubId = "demo", demo = false, userEmail = "", 
   }, []);
 
   _freshHandler = (fresh) => { setDb(fresh); setToast("Someone else just updated the club — showing the latest. Please redo your last change."); setTimeout(() => setToast(null), 4000); };
+  _saveErrorHandler = () => { setToast("Couldn't save that change. Check your connection and try again."); setTimeout(() => setToast(null), 4000); };
   const persist = (next) => { setDb(next); saveShared("doc", next); };
   const patch = (fn) => { const next = clone(db); const r = fn(next); if (r === false) return false; persist(next); return true; };
   const saveSession = (over = {}) => saveMine("session", { memberId: meId, lastRead, prefs, ...over });
