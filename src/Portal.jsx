@@ -692,6 +692,7 @@ export default function Portal({ clubId = "demo", demo = false, userEmail = "", 
   const isPres = me && me.role === "President";
   const canSchedule = me && (me.role === "President" || me.role === "Vice President");
   const isSecretary = me && me.role === "Secretary";
+  const canRecordMinutes = isSecretary || canSchedule; // Secretary, President, or Vice President — in case the secretary is absent
   const isTreasurer = me && me.role === "Treasurer";
   const canFinance = me && (isTreasurer || isPres);
   const memberById = (id) => db.members.find((m) => m.id === id);
@@ -722,7 +723,7 @@ export default function Portal({ clubId = "demo", demo = false, userEmail = "", 
   };
   const setPref = (cat, muted) => { const p = { ...prefs, muted: { ...prefs.muted, [cat]: muted } }; setPrefs(p); saveSession({ prefs: p }); };
 
-  const ctx = { db, patch, me, year, isEBOD, isPres, canSchedule, isSecretary, isTreasurer, canFinance, memberById, notify, audit, showToast, guardLock, setOverlay, overlay, setTab, signOut, prefs, setPref, demo, joinCode };
+  const ctx = { db, patch, me, year, isEBOD, isPres, canSchedule, isSecretary, canRecordMinutes, isTreasurer, canFinance, memberById, notify, audit, showToast, guardLock, setOverlay, overlay, setTab, signOut, prefs, setPref, demo, joinCode };
 
   if (!booted) return <div className="min-h-screen flex items-center justify-center" style={{ background: CRAN }}><style>{fontCss()}</style><Wheel size={90} color="rgba(255,255,255,.5)" /></div>;
 
@@ -1242,7 +1243,7 @@ function MeetingForm({ meeting, onClose }) {
 }
 
 function MeetingDetail({ id, onClose }) {
-  const { db, me, patch, isSecretary, canSchedule, memberById, notify, audit, showToast, setOverlay } = useApp();
+  const { db, me, patch, canRecordMinutes, canSchedule, memberById, notify, audit, showToast, setOverlay } = useApp();
   const m = db.meetings.find((x) => x.id === id);
   const [editAtt, setEditAtt] = useState(false);
   const [editMeeting, setEditMeeting] = useState(false);
@@ -1321,7 +1322,7 @@ function MeetingDetail({ id, onClose }) {
         )) : <span style={{ fontSize: 13.5, color: "#8A7580" }}>No agenda items.</span>}
       </Card>
 
-      <SectionTitle action={isSecretary && m.status === "published" ? <Btn small kind={editAtt ? "dark" : "ghost"} onClick={() => setEditAtt(!editAtt)}>{editAtt ? "Done" : "Record"}</Btn> : null}>Attendance</SectionTitle>
+      <SectionTitle action={canRecordMinutes && m.status === "published" ? <Btn small kind={editAtt ? "dark" : "ghost"} onClick={() => setEditAtt(!editAtt)}>{editAtt ? "Done" : "Record"}</Btn> : null}>Attendance</SectionTitle>
       {Object.keys(att).length > 0 || editAtt ? (
         <>
           <div className="flex gap-1.5 mb-2 flex-wrap">{ATT_STATUSES.map((s) => counts[s] > 0 && <Badge key={s} color={ATT_COLOR[s]}>{counts[s]} {s}</Badge>)}</div>
@@ -1351,7 +1352,7 @@ function MeetingDetail({ id, onClose }) {
                 <Icon name="users" size={14} color="#8A7580" /> {g.name} <Badge color={g.kind === "prospect" ? GOLD : AZURE}>{g.kind}</Badge>
               </div>
             )) : <span style={{ fontSize: 13, color: "#9A8B93" }}>No guests recorded.</span>}
-            {isSecretary && (
+            {canRecordMinutes && (
               <div className="flex gap-2 mt-2.5">
                 <Input value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="Guest name" style={{ flex: 1 }} />
                 <Select value={guestKind} onChange={(e) => setGuestKind(e.target.value)} style={{ width: 110 }}><option value="guest">Guest</option><option value="prospect">Prospect</option></Select>
@@ -1360,9 +1361,9 @@ function MeetingDetail({ id, onClose }) {
             )}
           </Card>
         </>
-      ) : <Empty icon="users" title="Not recorded yet" text={isSecretary ? "Tap Record when the meeting starts." : "The secretary records attendance."} />}
+      ) : <Empty icon="users" title="Not recorded yet" text={canRecordMinutes ? "Tap Record when the meeting starts." : "The secretary (or President/VP) records attendance."} />}
 
-      <SectionTitle action={isSecretary ? <Btn small kind="ghost" onClick={() => setMinutesOpen(true)}>{m.minutes ? "Revise / actions" : "Submit minutes"}</Btn> : null}>Minutes</SectionTitle>
+      <SectionTitle action={canRecordMinutes ? <Btn small kind="ghost" onClick={() => setMinutesOpen(true)}>{m.minutes ? "Revise / actions" : "Submit minutes"}</Btn> : null}>Minutes</SectionTitle>
       {m.minutes ? (
         <>
           {(() => { const v = m.minutes.versions[m.minutes.versions.length - 1]; return (
@@ -1393,7 +1394,7 @@ function MeetingDetail({ id, onClose }) {
               <Card className="p-2">
                 {m.minutes.actionItems.map((a, i) => (
                   <div key={a.id} className="flex items-center gap-3 px-2 py-2" style={{ borderTop: i ? `1px solid ${LINE}` : "none" }}>
-                    <button onClick={() => (isSecretary || a.assignee === me.id) && toggleAction(a.id)} className="rounded-full flex items-center justify-center flex-shrink-0"
+                    <button onClick={() => (canRecordMinutes || a.assignee === me.id) && toggleAction(a.id)} className="rounded-full flex items-center justify-center flex-shrink-0"
                       style={{ width: 24, height: 24, border: `2px solid ${a.done ? OK : "#C9B8C1"}`, background: a.done ? OK : "transparent" }}>
                       {a.done && <Icon name="check" size={13} color="#fff" />}
                     </button>
@@ -1407,7 +1408,7 @@ function MeetingDetail({ id, onClose }) {
             </>
           )}
         </>
-      ) : <Empty icon="doc" title="Minutes not posted" text="The secretary uploads the minutes PDF after the meeting; corrections keep a revision history." />}
+      ) : <Empty icon="doc" title="Minutes not posted" text="The secretary (or President/VP, if the secretary is absent) uploads the minutes PDF after the meeting; corrections keep a revision history." />}
 
       {canSchedule && m.status === "published" && m.date >= t && (
         <div className="mt-5"><Btn kind="danger" onClick={cancelMeeting}>Cancel this event & notify</Btn></div>
