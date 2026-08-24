@@ -44,6 +44,37 @@ No Supabase configured? The app automatically runs in **local demo mode**
 3. Put the **public** key in `.env` (next step). Skipping this section just means
    notifications stay in-app instead of arriving as device push.
 
+## 2b. Set up dues invoice emails (optional)
+
+Emails a member when a dues charge (monthly/district/RI) becomes due.
+
+1. Create a free account at [resend.com](https://resend.com) and generate an API key.
+2. From this folder:
+   ```bash
+   supabase secrets set RESEND_API_KEY=re_...
+   supabase functions deploy invoices
+   ```
+   By default it sends from `onboarding@resend.dev` (Resend's shared domain, works
+   immediately). To send from your own club's address instead, verify a domain in
+   Resend and set `supabase secrets set INVOICE_FROM_EMAIL=dues@yourclub.org`.
+3. Schedule it to run daily — Supabase dashboard → **SQL Editor**:
+   ```sql
+   create extension if not exists pg_cron;
+   create extension if not exists pg_net;
+   select cron.schedule(
+     'daily-dues-invoices', '0 13 * * *', -- 13:00 UTC daily; adjust to your timezone
+     $$
+     select net.http_post(
+       url := 'https://YOUR_PROJECT_REF.supabase.co/functions/v1/invoices',
+       headers := jsonb_build_object('Authorization', 'Bearer YOUR_SERVICE_ROLE_KEY', 'Content-Type', 'application/json'),
+       body := '{}'::jsonb
+     );
+     $$
+   );
+   ```
+   (Project ref and service role key: **Settings → API**.) Treasurers/Presidents can
+   also trigger it on demand from **Finance → Dues → Send invoices now**.
+
 ## 3. Run locally
 
 ```bash
