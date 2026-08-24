@@ -1,0 +1,5 @@
+# The invoices function handles its own authorization internally (CRON_SECRET for
+# the scheduled full-scan, is_club_member() for the manual per-club trigger), since
+# the scheduled Cron call has no Supabase user JWT to present.
+[functions.invoices]
+verify_jwt = false

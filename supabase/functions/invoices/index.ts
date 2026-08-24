@@ -1,11 +1,12 @@
 // Supabase Edge Function: email a dues invoice to every member whose charge
 // becomes due today. Deploy with:  supabase functions deploy invoices
-// Secrets needed:  RESEND_API_KEY, INVOICE_FROM_EMAIL (optional, defaults to
+// Secrets needed:  RESEND_API_KEY, CRON_SECRET (a random token only the
+// scheduled Cron job knows), INVOICE_FROM_EMAIL (optional, defaults to
 // onboarding@resend.dev — Resend's shared sending domain, works with no setup)
 //
 // Two ways to call it:
-//   1. No body / no clubId — scans every club for charges due today. Only the
-//      service role (a scheduled Cron job) may do this.
+//   1. No body / no clubId, Authorization: Bearer <CRON_SECRET> — scans every
+//      club for charges due today. Only the scheduled Cron job knows this token.
 //   2. { clubId } — scans just that club, for a manual "Send invoices now"
 //      button. Caller must be a member of that club (their own JWT is checked).
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -91,9 +92,9 @@ Deno.serve(async (req) => {
       const { data: isMember } = await userClient.rpc("is_club_member", { c: clubId });
       if (!isMember) return new Response("forbidden", { status: 403 });
     } else {
-      // Full scan across all clubs: only the service role (scheduled Cron) may do this.
+      // Full scan across all clubs: only the scheduled Cron job (which knows CRON_SECRET) may do this.
       const auth = req.headers.get("Authorization") ?? "";
-      if (auth !== `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`) return new Response("forbidden", { status: 403 });
+      if (auth !== `Bearer ${Deno.env.get("CRON_SECRET")}`) return new Response("forbidden", { status: 403 });
     }
 
     let query = admin.from("club_data").select("club_id, doc, version, clubs(name)");
