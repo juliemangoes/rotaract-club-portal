@@ -399,6 +399,15 @@ function waiveOutstandingCharges(d, memberId) {
   d.charges.filter((c) => c.memberId === memberId && !c.reversed).forEach((c) => { c.reversed = true; changed = true; });
   return changed;
 }
+// Standing guarantee, swept on every load: nobody in a dues-exempt status carries a
+// charge, no matter how it got there (imported data, an edge case, a past bug, ...).
+function ensureDuesExemption(d) {
+  let changed = false;
+  d.members.filter((m) => DUES_EXEMPT_STATUSES.includes(m.status)).forEach((m) => {
+    if (waiveOutstandingCharges(d, m.id)) changed = true;
+  });
+  return changed;
+}
 function memberAccount(d, memberId, yearId) {
   const ch = d.charges.filter((c) => c.memberId === memberId && c.yearId === yearId && !c.reversed);
   const pays = d.payments.filter((p) => p.memberId === memberId && p.yearId === yearId && !p.reversed);
@@ -644,6 +653,7 @@ export default function Portal({ clubId = "demo", demo = false, userEmail = "", 
       d.meetings.forEach((m) => { if (!m.kind) m.kind = "general"; if (m.projectId === undefined) m.projectId = ""; });
       ensureObligations(d);
       ensureGuestPromotions(d);
+      ensureDuesExemption(d);
       await saveShared("doc", d);
 
       if (demo) {
@@ -1738,11 +1748,12 @@ function DuesManager() {
     patch((d) => {
       d.duesConfig = { ...d.duesConfig, monthly: +cfg.monthly || 0, district: +cfg.district || 0, ri: +cfg.ri || 0, currency: cfg.currency || "$", dueDay: Math.min(28, Math.max(1, +cfg.dueDay || 5)), graceDays: +cfg.graceDays || 0, lateFee: +cfg.lateFee || 0, lateFeeOn: !!cfg.lateFeeOn, districtDueDate: cfg.districtDueDate || "", riDueDate: cfg.riDueDate || "" };
       ensureObligations(d);
+      ensureDuesExemption(d);
       audit(d, "Dues configuration changed", `Monthly ${money(+cfg.monthly, cfg.currency)}, due day ${cfg.dueDay}, grace ${cfg.graceDays}d`);
     });
     setCfgOpen(false); showToast("Dues configuration saved");
   };
-  const regen = () => { patch((d) => { const c = ensureObligations(d); if (c) audit(d, "Obligations generated", "Monthly/district/RI charges created"); }); showToast("Obligations up to date"); };
+  const regen = () => { patch((d) => { const c = ensureObligations(d); const w = ensureDuesExemption(d); if (c || w) audit(d, "Obligations generated", "Monthly/district/RI charges created, exempt members' charges waived"); }); showToast("Obligations up to date"); };
   const applyLateFees = () => {
     if (!db.duesConfig.lateFee) { showToast("Set a late charge amount first"); return; }
     let n = 0;
@@ -3100,7 +3111,7 @@ function MoreTab() {
     </Card>
   );
   const resetDemo = async () => {
-    const d = seedDb(); ensureObligations(d);
+    const d = seedDb(); ensureObligations(d); ensureDuesExemption(d);
     await saveShared("doc", d);
     window.location.reload();
   };
@@ -3267,6 +3278,7 @@ function YearManager({ onClose }) {
       d.years.unshift(newY);
       d.activeYearId = newY.id;
       ensureObligations(d);
+      ensureDuesExemption(d);
       notify(d, { type: "announcements", title: `Welcome to Rotary year ${newY.label}! 🎉`, body: `${oldY.label} is archived. New board: ${EBOD.map((r) => `${r} — ${d.members.find((m) => m.id === board[r])?.name || "TBA"}`).join("; ")}.` });
       audit(d, "Rotary year rollover", `${oldY.label} → ${newY.label}; ${carry.length} members carried${opts.balances ? "; balances carried" : ""}${opts.projects ? "; pending projects carried" : ""}`);
     });
