@@ -49,15 +49,23 @@ No Supabase configured? The app automatically runs in **local demo mode**
 Emails a member when a dues charge (monthly/district/RI) becomes due.
 
 1. Create a free account at [resend.com](https://resend.com) and generate an API key.
-2. From this folder:
+2. Generate a random token to authenticate the scheduled job (anything long and
+   random works, e.g. `openssl rand -hex 32`). From this folder:
    ```bash
    supabase secrets set RESEND_API_KEY=re_...
+   supabase secrets set CRON_SECRET=your-random-token
    supabase functions deploy invoices
    ```
    By default it sends from `onboarding@resend.dev` (Resend's shared domain, works
    immediately). To send from your own club's address instead, verify a domain in
    Resend and set `supabase secrets set INVOICE_FROM_EMAIL=dues@yourclub.org`.
-3. Schedule it to run daily — Supabase dashboard → **SQL Editor**:
+
+   The function checks authorization itself (`CRON_SECRET` for the scheduled scan,
+   club membership for the manual button), so `supabase/config.toml` disables the
+   platform's default JWT check for this function (`verify_jwt = false`) — the
+   scheduled job has no Supabase user session to present one with.
+3. Schedule it to run daily — Supabase dashboard → **SQL Editor** (this needs to be
+   run there; the CLI's direct-SQL path isn't permitted on this project):
    ```sql
    create extension if not exists pg_cron;
    create extension if not exists pg_net;
@@ -66,14 +74,15 @@ Emails a member when a dues charge (monthly/district/RI) becomes due.
      $$
      select net.http_post(
        url := 'https://YOUR_PROJECT_REF.supabase.co/functions/v1/invoices',
-       headers := jsonb_build_object('Authorization', 'Bearer YOUR_SERVICE_ROLE_KEY', 'Content-Type', 'application/json'),
+       headers := jsonb_build_object('Authorization', 'Bearer YOUR_CRON_SECRET', 'Content-Type', 'application/json'),
        body := '{}'::jsonb
      );
      $$
    );
    ```
-   (Project ref and service role key: **Settings → API**.) Treasurers/Presidents can
-   also trigger it on demand from **Finance → Dues → Send invoices now**.
+   (Project ref: **Settings → API**. Use the same random token you set as `CRON_SECRET`
+   above, not your service role key.) Treasurers/Presidents can also trigger a send
+   on demand from **Finance → Dues → Send invoices now**, which doesn't need any of this.
 
 ## 3. Run locally
 
