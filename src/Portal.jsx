@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import { getClubDoc, saveClubDoc, subscribeClubDoc, storageEnabled } from "./lib/clubStore";
 import { uploadFile } from "./lib/files";
 import { registerPush, sendPush } from "./lib/push";
+import { sendInvoicesNow } from "./lib/invoices";
 
 /* ============ Theme (club-configurable; Rotaract defaults) ============ */
 let CRAN = "#D41367", CRAN_DK = "#A50D50", AZURE = "#0067C8";
@@ -1738,10 +1739,11 @@ function ChargeCreditSheet({ memberId, onClose }) {
 }
 
 function DuesManager() {
-  const { db, patch, me, year, memberById, notify, audit, guardLock, showToast, setOverlay } = useApp();
+  const { db, patch, me, year, canFinance, memberById, notify, audit, guardLock, showToast, setOverlay } = useApp();
   const [cfgOpen, setCfgOpen] = useState(false);
   const [arrOpen, setArrOpen] = useState(null);
   const [cfg, setCfg] = useState({ ...db.duesConfig });
+  const [sendingInvoices, setSendingInvoices] = useState(false);
   const cur = db.duesConfig.currency;
   const members = db.members.filter((m) => ACTIVE_LIKE.includes(m.status));
   const saveCfg = () => {
@@ -1754,6 +1756,14 @@ function DuesManager() {
     setCfgOpen(false); showToast("Dues configuration saved");
   };
   const regen = () => { patch((d) => { const c = ensureObligations(d); const w = ensureDuesExemption(d); if (c || w) audit(d, "Obligations generated", "Monthly/district/RI charges created, exempt members' charges waived"); }); showToast("Obligations up to date"); };
+  const sendInvoices = async () => {
+    setSendingInvoices(true);
+    try {
+      const r = await sendInvoicesNow(CLUB_ID);
+      showToast(r?.invoicesSent ? `Sent ${r.invoicesSent} invoice email(s)` : "No charges due today");
+    } catch (e) { showToast("Couldn't send invoices: " + (e.message || e)); }
+    setSendingInvoices(false);
+  };
   const applyLateFees = () => {
     if (!db.duesConfig.lateFee) { showToast("Set a late charge amount first"); return; }
     let n = 0;
@@ -1797,7 +1807,9 @@ function DuesManager() {
         <Btn small kind="quiet" onClick={() => { setCfg({ ...db.duesConfig }); setCfgOpen(true); }}><span className="flex items-center gap-1.5"><Icon name="edit" size={14} /> Configure</span></Btn>
         <Btn small kind="quiet" onClick={regen}>Generate obligations</Btn>
         <Btn small kind="quiet" onClick={applyLateFees}>Apply late charges</Btn>
+        {canFinance && <Btn small kind="quiet" onClick={sendInvoices} disabled={sendingInvoices}>{sendingInvoices ? "Sending…" : "Send invoices now"}</Btn>}
       </div>
+      <p className="mt-1" style={{ fontSize: 11.5, color: "#9A8B93" }}>Invoice emails also go out automatically every day for charges due that day.</p>
       <p className="mt-2 mb-2" style={{ fontSize: 12, color: "#9A8B93" }}>Obligations (monthly, district, RI) are auto-created for each active, non-exempt member from the date they joined — Prospects and Guests owe nothing. Monthly due day {db.duesConfig.dueDay}, grace {db.duesConfig.graceDays} days.</p>
       <div className="flex flex-col gap-2">
         {members.map((m) => {
